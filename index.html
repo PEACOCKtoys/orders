@@ -62,8 +62,9 @@ onAuthStateChanged(auth,async u=>{
   unsubs.forEach(f=>f());unsubs=[];user=u;role=null;profile=null;orders=[];team=[];
   if(u){
     const e=u.email.toLowerCase();
-    role=e===OWNER.toLowerCase()?"owner":((await getDoc(doc(db,"roles",e)).catch(()=>null))?.data()?.role||"customer");
-    profile=(await getDoc(doc(db,"users",u.uid)).catch(()=>null))?.data()||null;
+    role=e===OWNER.toLowerCase()?"owner":"customer";draw(); // show signed-in state straight away
+    if(role!=="owner")role=(await getDoc(doc(db,"roles",e)).catch(()=>null))?.data()?.role||"customer";
+    profile=(await getDoc(doc(db,"users",u.uid)).catch(err=>{alert("Database not ready: "+err.message+"\nCreate Firestore and publish the rules (setup step 3).");return null}))?.data()||null;
     const oq=staff()?collection(db,"orders"):query(collection(db,"orders"),where("uid","==",u.uid));
     unsubs.push(onSnapshot(oq,s=>{orders=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.createdAt-a.createdAt);if(staff())sweep();draw()}));
     if(boss())unsubs.push(onSnapshot(collection(db,"roles"),s=>{team=s.docs.map(d=>({email:d.id,...d.data()}));draw()}));
