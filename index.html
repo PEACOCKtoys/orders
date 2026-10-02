@@ -1,4 +1,4 @@
-<DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="strict-origin">
@@ -203,7 +203,7 @@ dlg.addEventListener("submit",async e=>{
     id?await updateDoc(doc(db,"items",id),data):await addDoc(collection(db,"items"),data);
   }
   if(f.id==="priceForm"){const prices={};items.forEach(i=>{const v=d.get("p_"+i.id);if(v!==""&&v!==null)prices[i.id]=Number(v)});
-    await setDoc(doc(db,"pricing",f.dataset.uid),{discount:Number(d.get("discount")||0),prices})}
+    await setDoc(doc(db,"pricing",f.dataset.uid),{discount:0,prices})}
   dlg.close();draw();
   }catch(err){alert("Could not save: "+err.message)}
 });
@@ -228,8 +228,8 @@ document.addEventListener("click",async e=>{
   else if(a==="install"){if(installEv){installEv.prompt();installEv=null;draw()}else show('<h3 style="margin-top:0">Install on iPhone / iPad</h3><p>Tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>.</p><button data-a="close">Got it</button>')}
   else if(a==="close")dlg.close();
   else if(a==="prices"){const c=customers.find(x=>x.uid===id),p=pricings[id]||{};
-    show(`<h3 style="margin-top:0">Prices for ${esc(c?.nickname)}</h3><p class="mut">Leave a toy blank to use the discount or the standard price.</p>
-    <form id="priceForm" data-uid="${esc(id)}"><label>Discount on everything (%)<input name="discount" type="number" min="0" max="100" step="0.1" value="${p.discount||""}"></label>
+    show(`<h3 style="margin-top:0">Prices for ${esc(c?.nickname)}</h3><p class="mut">Type a special price (₹) for this customer. Leave a toy blank to charge the standard price.</p>
+    <form id="priceForm" data-uid="${esc(id)}">${items.length?"":"<p><b>List some toys in the Shop first.</b></p>"}
     ${items.map(i=>`<label>${esc(i.name)} <span class="mut">(standard ${money(i.price)})</span><input name="p_${i.id}" type="number" min="0" step="0.01" value="${p.prices?.[i.id]??""}"></label>`).join("")}
     <button>Save prices</button> <button type="button" class="g" data-a="close">Cancel</button></form>`)}
   else if(a==="done")await updateDoc(doc(db,"orders",id),{status:"done",doneAt:Date.now(),expireAt:Timestamp.fromMillis(Date.now()+15*DAY)});
