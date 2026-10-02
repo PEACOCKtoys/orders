@@ -24,10 +24,26 @@ details{border-top:1px solid #e1ecea;padding:6px 0}summary{cursor:pointer}detail
 .line{display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid #e1ecea}.line img{width:56px;height:56px;object-fit:contain;border-radius:6px;background:#f3f8f7}
 .pill{background:#e0f2ef;border-radius:99px;padding:2px 10px;font-size:12px}
 dialog{border:0;border-radius:14px;padding:18px;width:min(440px,94vw)}dialog::backdrop{background:#0008}
-input,select{width:100%;padding:9px;margin:4px 0 10px;border:1px solid #b9cfcb;border-radius:8px;font:inherit}
+input,select,textarea{font:inherit;width:100%;padding:9px;margin:4px 0 10px;border:1px solid #b9cfcb;border-radius:8px;font:inherit}
 .hero{background:linear-gradient(120deg,var(--nav),var(--teal));color:#fff;border-radius:14px;padding:22px;margin-bottom:14px}.hero h1{margin:0 0 4px;font-size:26px}
+
+/* ---- animations ---- */
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+@keyframes drift{0%,100%{background-position:0 50%}50%{background-position:100% 50%}}
+@keyframes sway{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(8deg)}}
+.enter .card,.enter .hero{animation:rise .45s ease both}
+.enter .grid .card:nth-child(2){animation-delay:.05s}.enter .grid .card:nth-child(3){animation-delay:.1s}.enter .grid .card:nth-child(4){animation-delay:.15s}.enter .grid .card:nth-child(n+5){animation-delay:.2s}
+.card{transition:transform .2s,box-shadow .2s}.grid .card:hover{transform:translateY(-4px);box-shadow:0 8px 18px #0f8b8d33}
+.card img.p,.gal img{transition:transform .3s}.card:hover .gal img{transform:scale(1.04)}
+button{transition:transform .12s,background .2s,box-shadow .2s}button:hover{transform:translateY(-1px);box-shadow:0 3px 8px #0003}button:active{transform:scale(.95)}
+nav a{transition:background .2s,border-color .25s}nav a:hover{background:#ffffff1f}
+.logo span{display:inline-block;animation:sway 3s ease-in-out infinite;transform-origin:70% 90%}
+.hero{background-size:200% 200%;animation:drift 10s ease-in-out infinite}
+dialog[open]{animation:pop .22s ease}.line,details{transition:background .2s}.line:hover{background:#f3f8f7}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
-<header><div class="logo">🦚 Peacock <i>Order</i></div><input id="q" placeholder="Search toys…" aria-label="Search toys"><div class="row" id="acct"></div></header>
+<header><div class="logo"><span>🦚</span> Peacock <i>Order</i></div><input id="q" placeholder="Search toys…" aria-label="Search toys"><div class="row" id="acct"></div></header>
 <nav id="nav"></nav><main id="main"></main><dialog id="dlg"></dialog>
 
 <script type="module">
@@ -52,14 +68,14 @@ const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app); 
 const $=s=>document.querySelector(s),DAY=864e5;
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=n=>"₹"+Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),when=t=>new Date(t).toLocaleString();
-let user=null,role=null,profile=null,items=[],orders=[],team=[],unsubs=[],search="",cart={};
+let user=null,role=null,profile=null,items=[],orders=[],team=[],customers=[],unsubs=[],search="",cart={};
 try{cart=JSON.parse(localStorage.getItem("po_cart")||"{}")}catch{}
 const saveCart=()=>{try{localStorage.setItem("po_cart",JSON.stringify(cart))}catch{}};
 const staff=()=>["owner","coOwner","admin"].includes(role),boss=()=>role==="owner"||role==="coOwner";
 const nick=()=>profile?.nickname||(user?"Set nickname":"");
 
 onAuthStateChanged(auth,async u=>{
-  unsubs.forEach(f=>f());unsubs=[];user=u;role=null;profile=null;orders=[];team=[];
+  unsubs.forEach(f=>f());unsubs=[];user=u;role=null;profile=null;orders=[];team=[];customers=[];
   if(u){
     const e=u.email.toLowerCase();
     role=e===OWNER.toLowerCase()?"owner":"customer";draw(); // show signed-in state straight away
@@ -67,12 +83,15 @@ onAuthStateChanged(auth,async u=>{
     profile=(await getDoc(doc(db,"users",u.uid)).catch(err=>{alert("Database not ready: "+err.message+"\nCreate Firestore and publish the rules (setup step 3).");return null}))?.data()||null;
     const oq=staff()?collection(db,"orders"):query(collection(db,"orders"),where("uid","==",u.uid));
     unsubs.push(onSnapshot(oq,s=>{orders=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.createdAt-a.createdAt);if(staff())sweep();draw()}));
+    if(staff())unsubs.push(onSnapshot(collection(db,"users"),s=>{customers=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(b.joinedAt||0)-(a.joinedAt||0));draw()},()=>{}));
     if(boss())unsubs.push(onSnapshot(collection(db,"roles"),s=>{team=s.docs.map(d=>({email:d.id,...d.data()}));draw()}));
     if(!profile)profileDlg();
   }
   draw();
 });
 onSnapshot(collection(db,"items"),s=>{items=s.docs.map(d=>({id:d.id,...d.data()}));draw()});
+addEventListener("hashchange",()=>{const m=$("#main");m.classList.add("enter");setTimeout(()=>m.classList.remove("enter"),900)});
+$("#main").classList.add("enter");setTimeout(()=>$("#main").classList.remove("enter"),1200);
 addEventListener("hashchange",draw);
 $("#q").addEventListener("input",e=>{search=e.target.value.toLowerCase();if(view()==="shop")$("#grid").innerHTML=gridHtml()});
 
@@ -87,12 +106,12 @@ function draw(){
   $("#acct").innerHTML=user?`<button class="g" data-a="profile" title="Edit nickname and phone">👤 ${esc(nick())}</button><button class="g" data-a="out">Sign out</button>`:`<button data-a="in">Sign in with Google</button>`;
   const tabs=[["shop","Shop"]];
   if(user)tabs.push(["cart",`Cart (${cartN()})`],["mine","My orders"]);
-  if(staff())tabs.push(["orders",`Orders (${open_().length})`],["bin","Order done bin"]);
+  if(staff())tabs.push(["orders",`Orders (${open_().length})`],["bin","Order done bin"],["customers",`Customers (${customers.length})`]);
   if(boss())tabs.push(["team","Team"]);
   let v=view();if(!tabs.some(t=>t[0]===v))v="shop";
   $("#nav").innerHTML=tabs.map(t=>`<a href="#${t[0]}" class="${t[0]===v?"on":""}">${t[1]}</a>`).join("");
   $("#q").style.display=v==="shop"?"":"none";
-  $("#main").innerHTML=({shop:shopV,cart:cartV,mine:mineV,orders:ordersV,bin:binV,team:teamV}[v])();
+  $("#main").innerHTML=({shop:shopV,cart:cartV,mine:mineV,orders:ordersV,bin:binV,team:teamV,customers:custV}[v])();
 }
 
 /* ---------- Shop ---------- */
@@ -122,11 +141,14 @@ const mineV=()=>!orders.length?`<p>You haven't placed any orders yet.</p>`:order
 
 /* ---------- Staff pages ---------- */
 const orderCard=(o,btn)=>`<div class="card" style="margin-bottom:12px">
-  <div class="row"><b>${esc(o.nickname)}</b><span>📞 ${esc(o.phone)}</span><span class="mut">${when(o.createdAt)}</span><b style="margin-left:auto">${money(o.total)}</b></div>
+  <div class="row"><b>${esc(o.nickname)}</b><span>📞 ${esc(o.phone)}</span><span class="mut">${when(o.createdAt)}</span><b style="margin-left:auto">${money(o.total)}</b></div>${o.shopName?`<div>🏪 <b>${esc(o.shopName)}</b>${o.address?" — "+esc(o.address):""}</div>`:""}
   ${o.items.map(x=>`<details><summary>${esc(x.name)} — ${money(x.price)} × <b>${x.qty}</b></summary><img src="${esc(x.img)}" alt=""></details>`).join("")}${btn}</div>`;
 const ordersV=()=>open_().length?open_().map(o=>orderCard(o,`<p><button data-a="done" data-id="${o.id}">Order complete</button></p>`)).join(""):`<p>No open orders.</p>`;
 const binV=()=>`<p class="mut">Completed orders are deleted permanently after 15 days.</p>`+(done_().length?done_().map(o=>
   orderCard(o,`<p class="mut">Deleted in ${Math.max(0,Math.ceil(15-(Date.now()-o.doneAt)/DAY))} day(s)</p>`)).join(""):`<p>The bin is empty.</p>`);
+const custV=()=>`<div class="card" style="margin-bottom:12px"><div class="price">${customers.length}</div><div class="mut">registered customers (only the owner and admins can see this page)</div></div>`+
+  (customers.map(c=>`<div class="card" style="margin-bottom:12px"><div class="row"><b>${esc(c.nickname)}</b><span>📞 ${esc(c.phone)}</span><span class="mut">${esc(c.email||"")}</span>${c.joinedAt?`<span class="mut" style="margin-left:auto">Joined ${new Date(c.joinedAt).toLocaleDateString()}</span>`:""}</div>
+  ${c.shopName?`<div>🏪 <b>${esc(c.shopName)}</b></div>`:""}${c.address?`<div>📍 ${esc(c.address)}</div>`:""}${c.other?`<div class="mut">📝 ${esc(c.other)}</div>`:""}</div>`).join("")||"<p>No customers yet.</p>");
 const teamV=()=>`<div class="card"><h3 style="margin-top:0">Add a team member</h3>
   <form id="roleForm"><input name="email" type="email" required placeholder="their Google email">
   <select name="role"><option value="admin">Admin (list toys, prices, pictures, view orders)</option>${role==="owner"?'<option value="coOwner">Co-owner (can also manage admins)</option>':""}</select><button>Add</button></form></div>
@@ -138,7 +160,11 @@ const teamV=()=>`<div class="card"><h3 style="margin-top:0">Add a team member</h
 const dlg=$("#dlg"),show=h=>{dlg.innerHTML=h;if(!dlg.open)dlg.showModal()};
 function profileDlg(){show(`<h3 style="margin-top:0">Your details</h3><p class="mut">Your nickname is shown instead of your email. Your phone number is visible only to the shop owner and admins.</p>
  <form id="profForm"><label>Nickname (max 100 characters)<input name="nick" maxlength="100" required value="${esc(profile?.nickname)}"></label>
- <label>Contact number<input name="phone" type="tel" maxlength="30" required value="${esc(profile?.phone)}"></label><button>Save</button></form>`)}
+ <label>Contact number<input name="phone" type="tel" maxlength="30" required value="${esc(profile?.phone)}"></label>
+ <p class="mut" style="margin:0 0 6px">Optional — only the shop owner and admins can see these:</p>
+ <label>Shop name<input name="shopName" maxlength="100" value="${esc(profile?.shopName)}"></label>
+ <label>Shop address<textarea name="address" maxlength="300" rows="2" style="width:100%;margin:4px 0 10px">${esc(profile?.address)}</textarea></label>
+ <label>Other details (GST no., city, notes…)<input name="other" maxlength="300" value="${esc(profile?.other)}"></label><button>Save</button></form>`)}
 function itemDlg(id){const i=items.find(x=>x.id===id)||{};
  show(`<h3 style="margin-top:0">${id?"Edit toy":"List a new toy"}</h3><form id="itemForm" data-id="${id||""}">
  <label>Name<input name="name" maxlength="80" required value="${esc(i.name)}"></label>
@@ -150,7 +176,7 @@ const shrink=(src,max,q)=>new Promise((res,rej)=>{const i=new Image();i.onload=(
 dlg.addEventListener("submit",async e=>{
   e.preventDefault();const f=e.target,d=new FormData(f);
   try{
-  if(f.id==="profForm"){profile={nickname:d.get("nick").trim().slice(0,100),phone:d.get("phone").trim()};await setDoc(doc(db,"users",user.uid),profile)}
+  if(f.id==="profForm"){profile={nickname:d.get("nick").trim().slice(0,100),phone:d.get("phone").trim(),shopName:d.get("shopName").trim(),address:d.get("address").trim(),other:d.get("other").trim(),email:user.email,joinedAt:profile?.joinedAt||Date.now()};await setDoc(doc(db,"users",user.uid),profile)}
   if(f.id==="itemForm"){
     const id=f.dataset.id,old=items.find(x=>x.id===id)||{},files=[...f.files.files].slice(0,3);
     let imgs=old.imgs||[],thumb=old.thumb||"";
@@ -184,7 +210,7 @@ document.addEventListener("click",async e=>{
     if(!profile)return profileDlg();
     const lines=Object.entries(cart).map(([i,q])=>{const it=items.find(x=>x.id===i);return it&&{id:i,name:it.name,price:it.price,qty:q,img:it.thumb||""}}).filter(Boolean);
     if(!lines.length)return;
-    await addDoc(collection(db,"orders"),{uid:user.uid,nickname:profile.nickname,phone:profile.phone,items:lines,
+    await addDoc(collection(db,"orders"),{uid:user.uid,nickname:profile.nickname,phone:profile.phone,shopName:profile.shopName||"",address:profile.address||"",items:lines,
       total:lines.reduce((s,x)=>s+x.price*x.qty,0),status:"open",createdAt:Date.now()});
     cart={};saveCart();location.hash="#mine";alert("Order placed! The shop will contact you.");
   }
