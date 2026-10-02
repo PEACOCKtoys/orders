@@ -72,7 +72,7 @@ const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app); 
 const $=s=>document.querySelector(s),DAY=864e5;
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=n=>"₹"+Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),when=t=>new Date(t).toLocaleString();
-let user=null,role=null,profile=null,items=[],orders=[],team=[],customers=[],myPricing=null,pricings={},unsubs=[],search="",cart={};
+let user=null,role=null,profile=null,items=[],orders=[],team=[],ordersErr="",customers=[],myPricing=null,pricings={},unsubs=[],search="",cart={};
 try{cart=JSON.parse(localStorage.getItem("po_cart")||"{}")}catch{}
 const saveCart=()=>{try{localStorage.setItem("po_cart",JSON.stringify(cart))}catch{}};
 const staff=()=>["owner","coOwner","admin"].includes(role),boss=()=>role==="owner"||role==="coOwner";
@@ -86,7 +86,7 @@ onAuthStateChanged(auth,async u=>{
     if(role!=="owner")role=(await getDoc(doc(db,"roles",e)).catch(()=>null))?.data()?.role||"customer";
     profile=(await getDoc(doc(db,"users",u.uid)).catch(err=>{alert("Database not ready: "+err.message+"\nCreate Firestore and publish the rules (setup step 3).");return null}))?.data()||null;
     const oq=staff()?collection(db,"orders"):query(collection(db,"orders"),where("uid","==",u.uid));
-    unsubs.push(onSnapshot(oq,s=>{orders=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.createdAt-a.createdAt);if(staff())sweep();draw()}));
+    unsubs.push(onSnapshot(oq,s=>{orders=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.createdAt-a.createdAt);if(staff())sweep();ordersErr="";draw()},err=>{ordersErr=err.message;draw()}));
     if(staff())unsubs.push(onSnapshot(collection(db,"pricing"),s=>{pricings={};s.docs.forEach(d=>pricings[d.id]=d.data());draw()},()=>{}));
     else unsubs.push(onSnapshot(doc(db,"pricing",u.uid),s=>{myPricing=s.data()||null;draw()},()=>{}));
     if(staff())unsubs.push(onSnapshot(collection(db,"users"),s=>{customers=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(b.joinedAt||0)-(a.joinedAt||0));draw()},()=>{}));
@@ -102,10 +102,24 @@ addEventListener("hashchange",draw);
 $("#q").addEventListener("input",e=>{search=e.target.value.toLowerCase();if(view()==="shop")$("#grid").innerHTML=gridHtml()});
 
 const view=()=>(location.hash||"#shop").slice(1);
+// Prices are worked out by staff from the shop's own data (never trusted from the customer) and frozen ("locked") at packing/completion.
+const lineP=(o,x)=>{if(o.locked&&o.locked[x.id]!==undefined)return Number(o.locked[x.id]);const it=items.find(i=>i.id===x.id);return it?priceFor(it,pricings[o.uid]):(Number(x.price)||0)};
+const orderTotal=o=>o.lockedTotal!==undefined?Number(o.lockedTotal):o.items.reduce((a,x)=>a+lineP(o,x)*x.qty,0);
+const lk=o=>!o||o.locked?{}:{locked:Object.fromEntries(o.items.map(x=>[x.id,lineP(o,x)])),lockedTotal:orderTotal(o)};
+function orderPdf(o){
+  if(!o)return;const c=customers.find(x=>x.uid===o.uid)||{};
+  const rows=o.items.map(x=>`<tr><td><img src="${esc(x.img)}"></td><td>${esc(x.name)}</td><td>${x.qty}</td><td>${money(lineP(o,x))}</td><td>${money(lineP(o,x)*x.qty)}</td></tr>`).join("");
+  const h=`<html><head><meta charset="utf-8"><title>Order ${esc(o.nickname)}</title><style>body{font:14px Arial,sans-serif;padding:24px;color:#10252e}h1{margin:0;color:#0c3b47}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{border-bottom:1px solid #ccc;padding:6px;text-align:left}td img{width:48px;height:48px;object-fit:contain}.r{text-align:right}</style></head><body>
+  <h1>🦚 Peacock Order</h1><p>Order date: ${when(o.createdAt)}<br>Status: ${STEPS[stIdx(o.status)]}${o.locked?" · Prices locked":""}</p>
+  <p><b>${esc(o.nickname)}</b><br>Phone: ${esc(o.phone)}${c.email?"<br>Email: "+esc(c.email):""}${o.shopName?"<br>Shop: "+esc(o.shopName):""}${o.address?"<br>Address: "+esc(o.address):""}</p>
+  <table><tr><th></th><th>Toy</th><th>Qty</th><th>Price</th><th>Amount</th></tr>${rows}</table><h2 class="r">Total: ${money(orderTotal(o))}</h2></body></html>`;
+  const f=document.createElement("iframe");f.style.cssText="position:fixed;width:0;height:0;border:0";document.body.appendChild(f);
+  f.onload=()=>setTimeout(()=>{f.contentWindow.focus();f.contentWindow.print();setTimeout(()=>f.remove(),60000)},300);f.srcdoc=h;
+}
 const STEPS=["Received","Packed","Delivered"],stIdx=x=>x==="done"?2:x==="packed"?1:0;
 const progress=x=>`<div class="steps">${STEPS.map((t,i)=>`<span class="${i<=stIdx(x)?"on":""}">${t}</span>`).join("")}</div>`;
 const wa=(ph,t)=>{let p=String(ph).replace(/\D/g,"");if(p.length===10)p="91"+p;return "https://wa.me/"+p+"?text="+encodeURIComponent(t)};
-const waOrder=o=>wa(o.phone,`Hello ${o.nickname}, this is Peacock Order about your order:\n`+o.items.map(x=>`• ${x.name} × ${x.qty}`).join("\n")+`\nTotal: ${money(o.total)}`);
+const waOrder=o=>wa(o.phone,`Hello ${o.nickname}, this is Peacock Order about your order:\n`+o.items.map(x=>`• ${x.name} × ${x.qty}`).join("\n")+`\nTotal: ${money(orderTotal(o))}`);
 let installEv=null;const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent),standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
 addEventListener("beforeinstallprompt",e=>{e.preventDefault();installEv=e;draw()});
 const installBtn=()=>installEv||(isIOS&&!standalone)?'<button class="g" data-a="install">📲 Install app</button>':"";
@@ -151,15 +165,21 @@ function cartV(){
    <button class="g" data-a="dec" data-id="${it.id}">−</button><b>${q}</b><button class="g" data-a="add" data-id="${it.id}">+</button></div>`).join("")}
    <p class="price">Total ${money(t)}</p><p class="mut">No online payment — the shop will contact you to arrange it.</p><button data-a="place">Place order</button></div>`;
 }
-const mineV=()=>!orders.length?`<p>You haven't placed any orders yet.</p>`:orders.map(o=>`<div class="card" style="margin-bottom:12px">
+const myCard=o=>`<div class="card" style="margin-bottom:12px">
   <div class="row"><b>${when(o.createdAt)}</b></div>${progress(o.status)}
-  ${o.items.map(x=>`<div class="line"><img src="${esc(x.img)}" alt=""><div>${esc(x.name)} × <b>${x.qty}</b></div></div>`).join("")}</div>`).join("");
+  ${o.items.map(x=>`<div class="line"><img src="${esc(x.img)}" alt=""><div>${esc(x.name)} × <b>${x.qty}</b></div></div>`).join("")}</div>`;
+const mineV=()=>{
+  if(!orders.length)return errBox()+`<p>You haven't placed any orders yet.</p>`;
+  const cur=orders.filter(o=>o.status!=="done"),old=orders.filter(o=>o.status==="done");
+  return `<h3 style="margin:0 0 10px">Current orders</h3>${cur.map(myCard).join("")||"<p class='mut'>No current orders.</p>"}
+  ${old.length?`<details style="margin-top:14px"><summary><b>Old orders (${old.length})</b> <span class="mut">— delivered, kept for 15 days</span></summary><div style="margin-top:10px">${old.map(myCard).join("")}</div></details>`:""}`};
 
 /* ---------- Staff pages ---------- */
 const orderCard=(o,btn)=>`<div class="card" style="margin-bottom:12px">
-  ${progress(o.status)}<div class="row"><b>${esc(o.nickname)}</b><span>📞 ${esc(o.phone)}</span><span class="mut">${when(o.createdAt)}</span><b style="margin-left:auto">${money(o.total)}</b></div>${o.shopName?`<div>🏪 <b>${esc(o.shopName)}</b>${o.address?" — "+esc(o.address):""}</div>`:""}
-  ${o.items.map(x=>`<details><summary>${esc(x.name)} — ${money(x.price)} × <b>${x.qty}</b></summary><img src="${esc(x.img)}" alt=""></details>`).join("")}<div class="row"><a class="wa" href="${waOrder(o)}" target="_blank" rel="noopener">💬 Message on WhatsApp</a>${btn}</div></div>`;
-const ordersV=()=>open_().length?open_().map(o=>orderCard(o,`${o.status==="open"?`<button class="g" data-a="packed" data-id="${o.id}">Mark as packed</button>`:""}<button data-a="done" data-id="${o.id}">Order complete</button>`)).join(""):`<p>No open orders.</p>`;
+  ${progress(o.status)}<div class="row"><b>${esc(o.nickname)}</b><span>📞 ${esc(o.phone)}</span><span class="mut">${when(o.createdAt)}</span><b style="margin-left:auto">${money(orderTotal(o))}${o.locked?" 🔒":""}</b></div>${o.shopName?`<div>🏪 <b>${esc(o.shopName)}</b>${o.address?" — "+esc(o.address):""}</div>`:""}
+  ${o.items.map(x=>`<details><summary>${esc(x.name)} — ${money(lineP(o,x))} × <b>${x.qty}</b></summary><img src="${esc(x.img)}" alt=""></details>`).join("")}<div class="row"><a class="wa" href="${waOrder(o)}" target="_blank" rel="noopener">💬 Message on WhatsApp</a><button class="g" data-a="pdf" data-id="${o.id}">📄 Download PDF</button>${btn}</div></div>`;
+const errBox=()=>ordersErr?`<div class="card" style="border-left:5px solid var(--red);margin-bottom:12px"><b>Could not load orders.</b><div class="mut">${esc(ordersErr)}</div><div>Check that the latest Firebase rules are published and the latest index.html is on GitHub.</div></div>`:"";
+const ordersV=()=>errBox()+(open_().length?open_().map(o=>orderCard(o,`${o.status==="open"?`<button class="g" data-a="packed" data-id="${o.id}">Mark as packed</button>`:""}${o.locked?"":`<button class="g" data-a="lock" data-id="${o.id}">🔒 Lock prices</button>`}<button data-a="done" data-id="${o.id}">Order complete</button>`)).join(""):`<p>No open orders.</p>`);
 const binV=()=>`<p class="mut">Completed orders are deleted permanently after 15 days.</p>`+(done_().length?done_().map(o=>
   orderCard(o,`<span class="mut">Deleted in ${Math.max(0,Math.ceil(15-(Date.now()-o.doneAt)/DAY))} day(s)</span>`)).join(""):`<p>The bin is empty.</p>`);
 const custV=()=>`<div class="card" style="margin-bottom:12px"><div class="price">${customers.length}</div><div class="mut">registered customers (only the owner and admins can see this page)</div></div>`+
@@ -224,22 +244,24 @@ document.addEventListener("click",async e=>{
   else if(a==="new")itemDlg();
   else if(a==="edit")itemDlg(id);
   else if(a==="del"){if(confirm("Remove this toy from the shop?"))await deleteDoc(doc(db,"items",id))}
-  else if(a==="packed")await updateDoc(doc(db,"orders",id),{status:"packed",packedAt:Date.now()});
+  else if(a==="packed")await updateDoc(doc(db,"orders",id),{status:"packed",packedAt:Date.now(),...lk(orders.find(x=>x.id===id))});
   else if(a==="install"){if(installEv){installEv.prompt();installEv=null;draw()}else show('<h3 style="margin-top:0">Install on iPhone / iPad</h3><p>Tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>.</p><button data-a="close">Got it</button>')}
   else if(a==="close")dlg.close();
+  else if(a==="pdf")orderPdf(orders.find(x=>x.id===id));
+  else if(a==="lock"){await updateDoc(doc(db,"orders",id),lk(orders.find(x=>x.id===id)))}
   else if(a==="prices"){const c=customers.find(x=>x.uid===id),p=pricings[id]||{};
     show(`<h3 style="margin-top:0">Prices for ${esc(c?.nickname)}</h3><p class="mut">Type a special price (₹) for this customer. Leave a toy blank to charge the standard price.</p>
     <form id="priceForm" data-uid="${esc(id)}">${items.length?"":"<p><b>List some toys in the Shop first.</b></p>"}
     ${items.map(i=>`<label>${esc(i.name)} <span class="mut">(standard ${money(i.price)})</span><input name="p_${i.id}" type="number" min="0" step="0.01" value="${p.prices?.[i.id]??""}"></label>`).join("")}
     <button>Save prices</button> <button type="button" class="g" data-a="close">Cancel</button></form>`)}
-  else if(a==="done")await updateDoc(doc(db,"orders",id),{status:"done",doneAt:Date.now(),expireAt:Timestamp.fromMillis(Date.now()+15*DAY)});
+  else if(a==="done")await updateDoc(doc(db,"orders",id),{status:"done",doneAt:Date.now(),...lk(orders.find(x=>x.id===id)),expireAt:Timestamp.fromMillis(Date.now()+15*DAY)});
   else if(a==="rmrole"){if(confirm("Remove "+id+"?"))await deleteDoc(doc(db,"roles",id))}
   else if(a==="place"){
     if(!profile)return profileDlg();
-    const lines=Object.entries(cart).map(([i,q])=>{const it=items.find(x=>x.id===i);return it&&{id:i,name:it.name,price:priceFor(it),qty:q,img:it.thumb||""}}).filter(Boolean);
+    const lines=Object.entries(cart).map(([i,q])=>{const it=items.find(x=>x.id===i);return it&&{id:i,name:it.name,qty:q,img:it.thumb||""}}).filter(Boolean);
     if(!lines.length)return;
     await addDoc(collection(db,"orders"),{uid:user.uid,nickname:profile.nickname,phone:profile.phone,shopName:profile.shopName||"",address:profile.address||"",items:lines,
-      total:lines.reduce((s,x)=>s+x.price*x.qty,0),status:"open",createdAt:Date.now()});
+      status:"open",createdAt:Date.now()});
     cart={};saveCart();location.hash="#mine";alert("Order placed! The shop will contact you.");
   }
   }catch(err){if(err.code!=="auth/popup-closed-by-user")alert("Something went wrong: "+err.message)}
